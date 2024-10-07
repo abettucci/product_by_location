@@ -3,9 +3,9 @@ import json
 import boto3
 import gspread
 import geocoder
+import os
 import pandas as pd
 import numpy as np
-import arrow
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient.errors import HttpError
 from gspread.exceptions import APIError
@@ -14,8 +14,6 @@ from rapidfuzz import fuzz
 import time
 from datetime import datetime, timedelta
 import pytz
-from meli_api import lambda_handler_location
-pd.set_option('display.max_colwidth', None)
 
 def get_secret_value_aws(secret_name):
     session = boto3.session.Session()
@@ -220,26 +218,29 @@ def get_answered_questions(item_id, token_de_acceso):
     response = requests.request("GET", url, headers=headers, data=payload)
 
     faq_dict = dict()
-    cant_respuestas = 0
-
-    cant_preguntas = response.json()["total"]
     preguntas = response.json()["questions"]
 
     for pregunta in preguntas:
         question = pregunta["text"]
         answer = pregunta["answer"]["text"].lower()
-        if answer:
-            faq_dict[question] = answer
-            cant_respuestas += 1
-
-    return faq_dict, cant_preguntas, cant_respuestas
+        faq_dict[question] = answer
     
-def get_seller_info(seller_id, token_de_acceso):
+    return faq_dict
+    
+def get_seller_nickname_and_city(seller_id, token_de_acceso):
     url = f"https://api.mercadolibre.com/users/{seller_id}"
     payload = {}
     headers = {'Authorization': 'Bearer ' + token_de_acceso}
     response = requests.request("GET", url, headers=headers, data=payload)
-    return response.json()
+    return response.json()["address"]["city"], response.json()["nickname"]
+
+def find_company_name_in_answers(item_id, token_de_acceso):
+    faq_dict = get_answered_questions(item_id, token_de_acceso)
+    hints = ["somos", "estamos en", "tienda", "saludos"]
+    for answer in faq_dict.values():
+        for hint in hints:
+            if hint in answer:
+                print(f"La palabra {hint} " + "esta dentro de la respuesta")
 
 # Por ahi es mejor dar un listado de opciones y que solo ingreses un numero y te busque con el id exacto de la categoria en vez de tipearla
 def get_codigo_categorias_por_nombre_de_categoria(nombre_categoria, token_de_acceso):
@@ -290,12 +291,9 @@ def get_items(next_page_url, token_de_acceso):
     return data
 
 # Busqueda por nombre de producto. Docu: https://developers.mercadolibre.com.ar/es_ar/items-y-busquedas#Obtener-%C3%ADtems-de-una-consulta-de-b%C3%BAsqueda
-def get_items_from_name_search(item_name, filtros, token_de_acceso):
-    
-    
+def get_items_from_name_search(item_name, token_de_acceso):
     # El limit es maximo de a 100 publicaciones por pagina. Con el search_type = scan podemos traer hasta 1000 registros (creo que no funca para busqueda por query search)
-    url = f"https://api.mercadolibre.com/sites/MLA/search?q={item_name}" + filtros
-    print(url)
+    url = f"https://api.mercadolibre.com/sites/MLA/search?q={item_name}"
     payload = {}
     headers = {'Authorization': 'Bearer ' + token_de_acceso}
     response = requests.request("GET", url, headers=headers, data=payload)
@@ -303,7 +301,6 @@ def get_items_from_name_search(item_name, filtros, token_de_acceso):
 
     if data is not None:
         total_results = data.get('paging', {}).get('total', 0)
-        print('Total results: ', total_results)
         items_per_page = data.get('paging', {}).get('limit', 0)
         total_pages = (total_results + items_per_page - 1) // items_per_page
         all_items = data.get('results', [])
@@ -320,86 +317,27 @@ def get_items_from_name_search(item_name, filtros, token_de_acceso):
 
     return all_items
 
-def get_search_filters_dictionary(item_name, token_de_acceso):
-    url = f"https://api.mercadolibre.com/sites/MLA/search?q={item_name}&offset=0&include_filters=true"
-    headers = {'Authorization': 'Bearer ' + token_de_acceso}
-    response = get_request(url, headers=headers).json()
+def find_company_name_in_description(item_id, token_de_acceso):
 
-    available_filters = response["available_filters"]
-    filters_values_dict = dict()
-    filters_values_id_dict = dict()
-    de_para_filtros_dict = dict()
-    de_para_filtros_values_dict = dict()
-    
-    for filter in available_filters:
-        values = filter['values']
-        for value in values:
-            filters_values_id_dict[filter['id']] = value['id']
+    # Aca deberia meter un GET de todos los items que se venden pero filtrando por CIUDAD y PROVINCIA para acortar los resultados
+    item_description =  get_item_description(item_id, token_de_acceso).lower()
+    # print(item_description)
 
-    for filter in available_filters:
-        values = filter['values']
-        for value in values:
-            if list(filters_values_dict.keys()) == []:
-                filters_values_dict[filter['name']] = [value['name']]
-            elif filter['name'] in list(filters_values_dict.keys()):
-                filters_values_dict[filter['name']].append(value['name'])
-            else: 
-                filters_values_dict[filter['name']] = [value['name']]
+    hints = ["somos", "estamos en", "tienda", "saludos"]
+    for hint in hints:
+        if hint in item_description:
+            # print(f"La palabra {hint} " + "esta dentro de la descripcion del item")
 
-    for filter in available_filters:
-        values = filter['values']
-        for value in values:
-            de_para_filtros_dict[value['name']] = value['id']
-            de_para_filtros_values_dict[value['id']] = filter['id']
+            seller_id = get_item_seller_id(item_id, token_de_acceso)
+            seller_city, seller_nickname = get_seller_nickname_and_city(seller_id, token_de_acceso)
 
-    return filters_values_dict, filters_values_id_dict, de_para_filtros_dict, de_para_filtros_values_dict
+            return seller_city, seller_nickname
 
-def get_visitas_publicacion(item_id_con_mla, fecha_inicio, fecha_fin, token_de_acceso): #fecha en formato 2024-08-01
-    url = f"https://api.mercadolibre.com/items/visits?ids={item_id_con_mla}&date_from={fecha_inicio}&date_to={fecha_fin}"
-    payload = {}
-    headers = {'Authorization': 'Bearer ' + token_de_acceso}
-    response = requests.request("GET", url, headers=headers, data=payload)
-    
-    return response.json()
+def find_company_location():
+    # Aca podria buscar en google el nombre de la empresa y con eso buscar con la API de google maps donde se encuentra o scrapear
+    # si tiene pagina web si dice las sucursales y su ubicacion.
 
-def get_reviews(url, token_de_acceso):
-    payload = {}
-    headers = {'Authorization': 'Bearer ' + token_de_acceso}
-    response = requests.request("GET", url, headers=headers, data=payload)
-    data = response.json()
-
-    rating_average, one_star, two_star, three_star, four_star, five_star = data.get('rating_average', None)\
-        , data.get("rating_levels", {}).get("one_star", None),  data.get("rating_levels", {}).get("two_star", None)\
-            , data.get("rating_levels", {}).get("three_star", None)\
-                , data.get("rating_levels", {}).get("four_star", None)\
-                    , data.get("rating_levels", {}).get("five_star", None)
-
-    # if data is not None:
-    #     total_results = data.get('paging', {}).get('total', 0)
-    #     reviews_per_page = data.get('paging', {}).get('limit', 0)
-    #     total_pages = (total_results + reviews_per_page - 1) // reviews_per_page
-    #     all_reviews = data.get('results', [])
-    #     for page in range(1, total_pages):
-    #         offset = page * reviews_per_page
-    #         next_page_url = f"{url}&offset={offset}"
-    #         page_data = get_reviews(next_page_url, token_de_acceso)
-    #         if page_data is not None:
-    #             all_reviews.extend(page_data.get('results', []))
-    #         else:
-    #             print(f"Failed to fetch data for page {page}")
-    # else:
-    #     print("Failed to fetch data for the initial page")
-
-    # print(all_reviews)
-
-    return rating_average, one_star, two_star, three_star, four_star, five_star
-
-def get_item_attributes(item_id, token_de_acceso):
-    url = f"https://api.mercadolibre.com/items/{item_id}?include_attributes=all"
-    payload = {}
-    headers = {'Authorization': 'Bearer ' + token_de_acceso}
-    response = requests.request("GET", url, headers=headers, data=payload)
-    return response.json()
+    return None
 
 def ver_data_schema(result):
     for field in result.keys():
@@ -416,48 +354,82 @@ def ver_data_schema(result):
         else:
             print(field, type(result.get(field)))
 
-start = arrow.utcnow()
-start_aux = start
-print("Inicio del proceso: "+ str(start))
+def get_coordinates_with_address(address, bing_map_api_key):
+    g = geocoder.bing(address, key = bing_map_api_key)
+    result = g.json    
+    # Check if the geocoding was successful
+    # data = {
+    #     'Latitude': result.get('lat', None),
+    #     'Longitude': result.get('lng', None),
+    #     'City': result.get('city', None),
+    #     'Country': result.get('country', None),
+    #     'Neighborhood': result.get('neighborhood', None),
+    #     'Postal': result.get('postal', None),
+    #     'Locality': result.get('locality', None),
+    #     'AdminDistrict': result.get('raw',[]).get('address',[]).get('adminDistrict', None),
+    #     'AdminDistrict2': result.get('raw',[]).get('address',[]).get('adminDistrict2', None),
+    #     'PostalCode': result.get('raw',[]).get('address',[]).get('postalCode', None),
+    #     'State': result.get('state', None),
+    #     'Street': result.get('street', None)
+    # }
+        
+    return result.get('lat', None), result.get('lng', None)
+ 
+def obtener_georeferencia(nombre_del_local, ciudad, bing_map_api_key):
+    # Construir la consulta con nombre del lugar, ciudad y país
+    query = f"{nombre_del_local}, {ciudad}, {"Argentina"}"
 
-def logueos():
-    # Con False desactivamos todos los prints, con True los activamos
-    # toggle_print(True)
+    # URL de la Bing Maps API para realizar la búsqueda
+    url = f"http://dev.virtualearth.net/REST/v1/Locations?query={query}&key={bing_map_api_key}"
 
-    # Iniciamos el cliente de S3 de AWS
-    s3_client = boto3.client('s3')
+    # Realizar la solicitud
+    response = requests.get(url)
+    resultados = response.json()
 
-    # Inicializamos contador de requests a la API de mercadolibre
-    meli_api_calls = 0
-    google_read_api_calls = 0
-    google_write_api_calls = 0
-    total_google_api_calls = 0
+    # Verifica si se encontraron resultados
+    if resultados['resourceSets'][0]['estimatedTotal'] > 0:
+        lugar = resultados['resourceSets'][0]['resources'][0]
+        nombre = lugar['name']
+        direccion = lugar['address']['formattedAddress']
+        coordenadas = lugar['point']['coordinates']
+        latitud = coordenadas[0]
+        longitud = coordenadas[1]
+    else:
+        print("No se encontró el lugar.")
 
-    # Obtenemos las credenciales de la API de MercadoLibre con un secreto del SecretManager de AWS pasandole la ruta del secreto
-    # Leemos el sheets de Tokens que contiene los ultimos tokens para renovarlos o volver a utilizarlos e iniciamos un cliente de Google
-    worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list = google_sheets_auth(google_read_api_calls)
+    return latitud, longitud
 
-    # Coin Custody fila 2, Test user fila 7
-    fila = 7
-    for fila in range(7,8):
-        # Obtenemos la hora actual para evaluar si se supero el horario de expiracion de los tokens de la API de MELI
-        buenos_aires_timezone = pytz.timezone('America/Argentina/Buenos_Aires')
-        current_time = datetime.now(buenos_aires_timezone).strftime('%Y-%m-%d %H:%M:%S')
-        current_time = datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')
+def obtener_direccion_por_nombre_comercio_gmaps():
 
-        # Obtenemos los tokens del sheets
-        token_de_acceso, cuenta_meli = get_mercado_libre_token(current_time, worksheet_tokens_mio, fila, meli_api_calls, google_write_api_calls)
+
+    return None
+
+def obtener_nombres_comercios_meli():
+
+
+
+    return None
+
+# Función para calcular la distancia usando la fórmula de Haversine
+def obtener_distancia_entre_local_y_ubicacion_actual(lat1, lon1, lat2, lon2):
+    # Convertir de grados a radianes
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+
+    # Diferencias de latitud y longitud
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    # Aplicar fórmula de Haversine
+    a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
     
-    print("Demora en logueos (seconds): " + str((arrow.utcnow() - start).total_seconds()))
+    # Radio de la Tierra en kilómetros
+    r = 6371
+    return round(c * r,1)
 
-    return token_de_acceso, cuenta_meli
+def lambda_handler_location(item_name, token_de_acceso):
 
-def lambda_handler(item_name, filtros, token_de_acceso):
-
-    items_scrapeados =  get_items_from_name_search(item_name, filtros, token_de_acceso)
-    print("Scrapeado de publicaciones de este producto (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-    # item_hardcodeado = get_item_attributes('MLA1383081509', token_de_acceso)
+    items_scrapeados =  get_items_from_name_search(item_name, token_de_acceso) #Ojo con el tema de la paginacion!
 
     dict_vendors_name_and_city = dict()
     data_diccionario_items = []
@@ -465,62 +437,53 @@ def lambda_handler(item_name, filtros, token_de_acceso):
     for item in items_scrapeados:
         item_id_con_mla = item['id']
         item_url = item['permalink']
-        seller_id = item['seller']['id']
-
         try:
-            faq_dict, cant_preguntas, cant_respuestas = get_answered_questions(item_id_con_mla, token_de_acceso)
-            # print("Get answered questions (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-            fecha_inicio, fecha_fin = ("2024-01-01", "2024-08-27")
-            cantidad_visitas = get_visitas_publicacion(item_id_con_mla, fecha_inicio, fecha_fin, token_de_acceso)[0]["total_visits"]
-            # print("Get item views (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-            
-            seller_info = get_seller_info(seller_id, token_de_acceso)
-            # print ("Get seller info (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-            seller_city, seller_nickname, seller_level, seller_txs = seller_info["address"]["city"], seller_info["nickname"]\
-                , seller_info["seller_reputation"]["level_id"], seller_info["seller_reputation"]["transactions"]["total"]
-            
-            url = f"https://api.mercadolibre.com/reviews/item/{item_id_con_mla}"
-            rating_average, one_star, two_star, three_star, four_star, five_star = get_reviews(url, token_de_acceso)
+            ciudad, nombre_del_local = find_company_name_in_description(item_id_con_mla, token_de_acceso)
 
             # Rellenamos el diccionario de vendedores y ubicacion
-            if seller_nickname not in list(dict_vendors_name_and_city.keys()):
-                dict_vendors_name_and_city[seller_nickname] = [seller_level, seller_txs, cantidad_visitas]
+            if nombre_del_local not in list(dict_vendors_name_and_city.keys()):
+                dict_vendors_name_and_city[nombre_del_local] = ciudad
 
             # Rellenamos el diccionario de items, url y vendedor (luego joinearlo con un merge de dos df)
-            for seller_nickname, ciudad in dict_vendors_name_and_city.items():
+            for nombre_del_local, ciudad in dict_vendors_name_and_city.items():
                 fila = {
-                    "seller_nickname" : seller_nickname,
+                    "nombre_del_local" : nombre_del_local,
                     "item_id" : item_id_con_mla,
-                    "item_url" : item_url,
-                    "seller_level" : seller_level, 
-                    "seller_txs" : seller_txs,
-                    "rating_average" : rating_average, 
-                    "one_star": one_star, 
-                    "two_star" : two_star, 
-                    "three_star" : three_star, 
-                    "four_star" : four_star, 
-                    "five_star" : five_star
-                }
+                    "item_url" : item_url
+                } 
                 data_diccionario_items.append(fila)
 
         except:
             pass
 
-    df_reputacion_vendors = pd.DataFrame(data_diccionario_items)
-    df_reputacion_vendors_sin_dup = df_reputacion_vendors.drop_duplicates(subset=["seller_nickname"], keep='first')
+    # Obtener la API key desde las variables de entorno
+    bing_map_api_key = os.getenv('API_KEY')
 
-    print(df_reputacion_vendors_sin_dup[["seller_nickname", "item_url", "seller_level", "seller_txs", "rating_average"]].sort_values(by='rating_average', ascending=False))
+    if not bing_map_api_key:
+        raise ValueError("No se encontró la API key")
 
-    print ("Armado de dataframe final (seconds): " + str((arrow.utcnow() - start).total_seconds()))
+    # Coordenadas de tu ubicación actual (Aguero 1595)
+    mi_latitud, mi_longitud = get_coordinates_with_address('Agüero 1595, Capital Federal, Argentina', bing_map_api_key)
 
-    lambda_handler_location(item_name, token_de_acceso)
+    data = []
+    for nombre_del_local, ciudad in dict_vendors_name_and_city.items():
+        latitud, longitud = obtener_georeferencia(nombre_del_local, ciudad, bing_map_api_key)
+        fila = {
+            "nombre_del_local" : nombre_del_local,
+            "ciudad" : ciudad,
+            "latitud" : latitud,
+            "longitud": longitud,
+            "distancia": obtener_distancia_entre_local_y_ubicacion_actual(mi_latitud, mi_longitud, latitud, longitud),
+        } 
+        data.append(fila)
 
-    return df_reputacion_vendors_sin_dup
+    df_distancias_vendors = pd.DataFrame(data)
+    df_items_vendors = pd.DataFrame(data_diccionario_items)
 
-token_de_acceso, cuenta_meli = logueos()
+    df_final = df_items_vendors.merge(df_distancias_vendors, on='nombre_del_local', how='left')
 
-lambda_handler('saboteur', '', token_de_acceso)
+    print(df_final.sort_values(by='distancia', ascending=True))
 
-# filters_values_dict, filters_values_id_dict, de_para_filtros_dict, de_para_filtros_values_dict = get_search_filters_dictionary("saboteur", token_de_acceso)
+    # df_georeferencias['distancia_km'] = df_georeferencias.apply(lambda row: obtener_distancia_entre_local_y_ubicacion_actual(mi_latitud, mi_longitud, row['latitude'], row['longitude']), axis=1)
+
+    return df_final
