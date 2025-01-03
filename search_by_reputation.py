@@ -344,10 +344,7 @@ def get_search_filters_dictionary(item_name, token_de_acceso):
     url = f"https://api.mercadolibre.com/sites/MLA/search?q={item_name}&offset=0&include_filters=true"
     headers = {'Authorization': 'Bearer ' + token_de_acceso}
     response = get_request(url, headers=headers).json()
-
     available_filters = response["available_filters"]
-
-    print(available_filters)
 
     filters_values_dict = dict()
     filters_values_id_dict = dict()
@@ -542,8 +539,29 @@ def lambda_handler(item_name, filtros, token_de_acceso, google_api_dict_list):
     
     dict_provincias = {
         'AR-B' : 'Buenos Aires',
-        'AR-C' : 'Ciudad Autonoma de Buenos Aires',
-        'AR-M' : 'Mendoza'
+        'AR-C' : 'Capital Federal',
+        'AR-Y' : 'Jujuy',
+        'AR-M' : 'Mendoza',
+        'AR-E' : 'Entre Ríos',
+        'AR-T' : 'Tucumán',
+        'AR-W' : 'Corrientes',
+        'AR-U' : 'Chubut',
+        'AR-D' : 'San Luis',
+        'AR-A' : 'Salta',
+        'AR-F' : 'La Rioja',
+        'AR-G' : 'Santiago del Estero',
+        'AR-H' : 'Chaco',
+        'AR-J' : 'San Juan',
+        'AR-K' : 'Catamarca',
+        'AR-L' : 'La Pampa',
+        'AR-N' : 'Misiones',
+        'AR-P' : 'Formosa',
+        'AR-Q' : 'Neuquen',
+        'AR-R' : 'Río Negro',
+        'AR-S' : 'Santa Fe',
+        'AR-V' : 'Tierra del Fuego',
+        'AR-X' : 'Córdoba',
+        'AR-Z' : 'Santa Cruz'
     }
     dict_vendors_name_and_city = dict()
     dict_items = dict()
