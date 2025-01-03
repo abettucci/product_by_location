@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import pytz
+from gui import get_secret_value_aws
 
 # from PIL import Image
 # import easyocr
@@ -25,15 +26,15 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
 # stop_words = set(stopwords.words('spanish'))
 
-def get_secret_value_aws(secret_name):
-    session = boto3.session.Session()
-    client = session.client(service_name='secretsmanager', region_name="us-east-2")
-    try:
-        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-    except ClientError as e:
-        raise e
-    secret = get_secret_value_response['SecretString']
-    return secret
+# def get_secret_value_aws(secret_name):
+#     session = boto3.session.Session()
+#     client = session.client(service_name='secretsmanager', region_name="us-east-2")
+#     try:
+#         get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+#     except ClientError as e:
+#         raise e
+#     secret = get_secret_value_response['SecretString']
+#     return secret
 
 def get_request(url, headers):
     response = requests.get(url, headers=headers)
@@ -185,6 +186,7 @@ def google_sheets_auth(google_read_api_calls):
         'abettucci/MELIproject/Google_API_JSON_Key_File']
     for api_dict in google_key_locations:
         secret = get_secret_value_aws(api_dict)
+
         secret_data = json.loads(secret)
         key_dict = {
             "private_key_id" : secret_data.get('private_key_id'),
