@@ -1,6 +1,6 @@
 import requests
 import json
-import boto3
+import boto3, boto3.session
 import gspread
 import pandas as pd
 import arrow
@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import pytz
-from gui import get_secret_value_aws
+import streamlit as st
 
 # from PIL import Image
 # import easyocr
@@ -26,15 +26,28 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
 # stop_words = set(stopwords.words('spanish'))
 
-# def get_secret_value_aws(secret_name):
-#     session = boto3.session.Session()
-#     client = session.client(service_name='secretsmanager', region_name="us-east-2")
-#     try:
-#         get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-#     except ClientError as e:
-#         raise e
-#     secret = get_secret_value_response['SecretString']
-#     return secret
+def get_secret_value_aws(secret_name):
+    # Leer las credenciales desde st.secrets
+    AWS_ACCESS_KEY_ID = st.secrets["AWS_ACCESS_KEY_ID"]
+    AWS_SECRET_ACCESS_KEY = st.secrets["AWS_SECRET_ACCESS_KEY"]
+    region_name = st.secrets.get("AWS_REGION", "us-east-2")
+
+    # Crear sesión con las credenciales
+    session = boto3.session.Session(
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=region_name
+    )
+    client = session.client(service_name="secretsmanager")
+
+    try:
+        # Obtener el secreto
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+        secret = get_secret_value_response['SecretString']
+        return secret
+    except ClientError as e:
+        st.error(f"Error al obtener el secreto: {e}")
+        raise e
 
 def get_request(url, headers):
     response = requests.get(url, headers=headers)

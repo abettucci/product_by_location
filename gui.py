@@ -1,30 +1,5 @@
 import streamlit as st
 from search_by_reputation import logueos, lambda_handler, get_search_filters_dictionary
-import boto3, boto3.session
-from botocore.exceptions import ClientError
-
-def get_secret_value_aws(secret_name):
-    # Leer las credenciales desde st.secrets
-    AWS_ACCESS_KEY_ID = st.secrets["AWS_ACCESS_KEY_ID"]
-    AWS_SECRET_ACCESS_KEY = st.secrets["AWS_SECRET_ACCESS_KEY"]
-    region_name = st.secrets.get("AWS_REGION", "us-east-2")
-
-    # Crear sesión con las credenciales
-    session = boto3.session.Session(
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        region_name=region_name
-    )
-    client = session.client(service_name="secretsmanager")
-
-    try:
-        # Obtener el secreto
-        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-        secret = get_secret_value_response['SecretString']
-        return secret
-    except ClientError as e:
-        st.error(f"Error al obtener el secreto: {e}")
-        raise e
     
 # Obtener el token de acceso y la cuenta de MercadoLibre
 token_de_acceso, cuenta_meli = logueos()
