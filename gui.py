@@ -1,14 +1,11 @@
 import streamlit as st
-import json 
-import requests
-from PIL import Image
 from search_by_reputation import logueos, lambda_handler, get_search_filters_dictionary
 
 # Obtener el token de acceso y la cuenta de MercadoLibre
 token_de_acceso, cuenta_meli = logueos()
 
 # Crear el título de la app
-st.title("MercadoLibre Bot Scraper de vendedores con mejor reputacion y preguntas respondidas")
+st.title("MercadoLibre Bot Scraper de vendedores con mejor reputacion, cercania y mayor cantidad de preguntas respondidas")
 
 # Tomar el input del usuario para el nombre del producto
 producto = st.text_input("Nombre del item", "")
@@ -40,40 +37,20 @@ filtro_marca = de_para_filtros_values_dict[marca] + '=' + de_para_filtros_dict[m
 # Crear la cadena de filtros
 filtros = '&' + filtro_ubicacion + '&' + filtro_condicion + '&' + filtro_marca
 
-print(filtros)
+# print(filtros)
 
-exit()
+# exit()
 
-        # # Botón de submit para procesar los filtros
-        # submit = st.button("Submit")
+# Botón de submit para procesar los filtros
+submit = st.button("Submit")
 
-        # # Si el botón es clicado, ejecutar la función
-        # if submit:
-        #     df_resultados = lambda_handler(producto, token_de_acceso, filtros)
+# Si el botón es clicado, ejecutar la función
+if submit:
+        df_resultados = lambda_handler(producto, token_de_acceso, filtros)
 
-        #     # Mostrar los resultados
-        #     st.write('Resultados dataframe:')
-        #     st.dataframe(df_resultados)
-
-        #     # # Remove any commas from the max_price before sending the request.
-        #     # if "," in max_price:
-        #     #     max_price = max_price.replace(",", "")
-        #     # else:
-        #     #     pass
-            
-
-        #     # # Convert the response from json into a Python list.
-        #     # results = res.json()
-            
-        #     # # Display the length of the results list.
-        #     # st.write(f"Number of results: {len(results)}")
-            
-        #     # # Iterate over the results list to display each item.
-        #     # for item in results:
-        #     #     st.header(item["title"])
-        #     #     img_url = item["image"]
-        #     #     st.image(img_url, width=200)
-        #     #     st.write(item["price"])
-        #     #     st.write(item["location"])
-        #     #     st.write(f"https://www.facebook.com{item['link']}")
-        #     #     st.write("----")
+        # Mostrar los resultados
+        st.write('Resultados dataframe:')
+        st.dataframe(df_resultados)
+        
+        # Display the length of the results list.
+        st.write(f"Number of results: {len(df_resultados)}")

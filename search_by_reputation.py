@@ -2,20 +2,28 @@ import requests
 import json
 import boto3
 import gspread
-import geocoder
 import pandas as pd
-import numpy as np
 import arrow
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient.errors import HttpError
-from gspread.exceptions import APIError
 from botocore.exceptions import ClientError
 from rapidfuzz import fuzz
 import time
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import pytz
-from meli_api import lambda_handler_location
-pd.set_option('display.max_colwidth', None)
+
+# from PIL import Image
+# import easyocr
+# import nltk
+# Lista de palabras comunes en español (stop words)
+# nltk.download('stopwords')
+# from nltk.corpus import stopwords
+# import re
+# from io import BytesIO
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+# stop_words = set(stopwords.words('spanish'))
 
 def get_secret_value_aws(secret_name):
     session = boto3.session.Session()
@@ -184,7 +192,8 @@ def google_sheets_auth(google_read_api_calls):
             "project_id" : secret_data.get('project_id'),
             "client_id" : secret_data.get('client_id'),
             "client_email" : secret_data.get('client_email'),
-            "private_key" : secret_data.get('private_key')}
+            "private_key" : secret_data.get('private_key'),
+            "token_uri": secret_data.get("token_uri")}
         google_api_dict_list.append(key_dict)
 
     # Leemos el sheets de Tokens que contiene los ultimos tokens para renovarlos o volver a utilizarlos e iniciamos un cliente de Google
@@ -197,7 +206,7 @@ def google_sheets_auth(google_read_api_calls):
     worksheet_tokens_mio = make_read_api_call('get_worksheet_by_id',1387040377,sh,'','', google_api_dict_list)
     google_read_api_calls += 1
 
-    return worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list
+    return worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list, creds
 
 def get_item_seller_id(item_id, token_de_acceso):
     url = f"https://api.mercadolibre.com/items/{item_id}?include_attributes=all"
@@ -218,19 +227,16 @@ def get_answered_questions(item_id, token_de_acceso):
     payload = {}
     headers = {'Authorization': 'Bearer ' + token_de_acceso}
     response = requests.request("GET", url, headers=headers, data=payload)
-
     faq_dict = dict()
     cant_respuestas = 0
-
     cant_preguntas = response.json()["total"]
     preguntas = response.json()["questions"]
-
     for pregunta in preguntas:
         question = pregunta["text"]
-        answer = pregunta["answer"]["text"].lower()
-        if answer:
-            faq_dict[question] = answer
-            cant_respuestas += 1
+        if pregunta["answer"]:
+            if pregunta["answer"]["text"].lower():
+                faq_dict[question] = pregunta["answer"]["text"].lower()
+                cant_respuestas += 1
 
     return faq_dict, cant_preguntas, cant_respuestas
     
@@ -435,7 +441,7 @@ def logueos():
 
     # Obtenemos las credenciales de la API de MercadoLibre con un secreto del SecretManager de AWS pasandole la ruta del secreto
     # Leemos el sheets de Tokens que contiene los ultimos tokens para renovarlos o volver a utilizarlos e iniciamos un cliente de Google
-    worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list = google_sheets_auth(google_read_api_calls)
+    worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list, creds = google_sheets_auth(google_read_api_calls)
 
     # Coin Custody fila 2, Test user fila 7
     fila = 7
@@ -450,17 +456,79 @@ def logueos():
     
     print("Demora en logueos (seconds): " + str((arrow.utcnow() - start).total_seconds()))
 
-    return token_de_acceso, cuenta_meli
+    return token_de_acceso, cuenta_meli, google_api_dict_list
 
-def lambda_handler(item_name, filtros, token_de_acceso):
+# # Función para extraer texto desde una URL de imagen
+# def extract_text_from_image_url(reader, url):
+#     try:
+#         # Descargar la imagen desde la URL
+#         response = requests.get(url)
+#         response.raise_for_status()  # Verificar que no haya errores en la descarga
 
+#         # Abrir la imagen
+#         image = np.array(Image.open(BytesIO(response.content)))
+
+#         # Realizar la detección de texto
+#         result = reader.readtext(image)
+
+#         # Extraer y juntar el texto
+#         text = " ".join([item[1] for item in result])
+#         return text
+#     except Exception as e:
+#         print(f"Error al procesar la imagen en {url}: {e}")
+#         return None
+
+# def search_company_name_in_pictures(item_name, filtros, token_de_acceso, google_api_dict_list):
+#     diccionario_fotos = dict()
+
+#     items_scrapeados =  get_items_from_name_search(item_name, filtros, token_de_acceso)
+#     print("Scrapeado de publicaciones de este producto (seconds): " + str((arrow.utcnow() - start).total_seconds()))
+
+#     for item in items_scrapeados:
+#         item_id_con_mla = item['id']
+#         item_attributes = get_item_attributes(item_id_con_mla, token_de_acceso)
+    
+#         imagenes = item_attributes["pictures"]
+#         for elemento_imagen in imagenes:
+#             if item_id_con_mla not in list(diccionario_fotos.keys()):
+#                 diccionario_fotos[item_id_con_mla] = [elemento_imagen["secure_url"]]
+#             else:
+#                 diccionario_fotos[item_id_con_mla].append(elemento_imagen["secure_url"])
+
+#     # Diccionario para almacenar el texto extraído de cada grupo
+#     extracted_texts = {}
+
+#     # Extraer texto para cada URL de imagen en el diccionario
+#     for group, urls in diccionario_fotos.items():
+#         extracted_texts[group] = []
+#         for url in urls:
+#             print(url)
+#             text = detect_text_from_url(url, google_api_dict_list)
+#             print(text)
+#             if text:
+#                 extracted_texts[group].append(text)
+                
+#     # # Mostrar los resultados
+#     # for group, texts in extracted_texts.items():
+#     #     print(f"Texto de {group}:")
+#     #     for idx, text in enumerate(texts, 1):
+#     #         print(f"Texto de URL {idx}: {text}")
+#     #     print("="*50) 
+
+#     # return  diccionario_fotos
+
+def lambda_handler(item_name, filtros, token_de_acceso, google_api_dict_list):
     items_scrapeados =  get_items_from_name_search(item_name, filtros, token_de_acceso)
-    print("Scrapeado de publicaciones de este producto (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-    # item_hardcodeado = get_item_attributes('MLA1383081509', token_de_acceso)
-
+    
+    dict_provincias = {
+        'AR-B' : 'Buenos Aires',
+        'AR-C' : 'Ciudad Autonoma de Buenos Aires',
+        'AR-M' : 'Mendoza'
+    }
     dict_vendors_name_and_city = dict()
+    dict_items = dict()
     data_diccionario_items = []
+    data_diccionario_sellers = []
 
     for item in items_scrapeados:
         item_id_con_mla = item['id']
@@ -469,58 +537,71 @@ def lambda_handler(item_name, filtros, token_de_acceso):
 
         try:
             faq_dict, cant_preguntas, cant_respuestas = get_answered_questions(item_id_con_mla, token_de_acceso)
-            # print("Get answered questions (seconds): " + str((arrow.utcnow() - start).total_seconds()))
 
-            fecha_inicio, fecha_fin = ("2024-01-01", "2024-08-27")
-            cantidad_visitas = get_visitas_publicacion(item_id_con_mla, fecha_inicio, fecha_fin, token_de_acceso)[0]["total_visits"]
-            # print("Get item views (seconds): " + str((arrow.utcnow() - start).total_seconds()))
+            fecha_hoy = datetime.now()
+            fecha_hace_3_meses = fecha_hoy - relativedelta(months=3)
+
+            fecha_inicio, fecha_fin = (fecha_hace_3_meses.strftime('%Y-%m-%d'), fecha_hoy.strftime('%Y-%m-%d'))
+            cantidad_visitas_l3m = get_visitas_publicacion(item_id_con_mla, fecha_inicio, fecha_fin, token_de_acceso)[0]["total_visits"]
             
             seller_info = get_seller_info(seller_id, token_de_acceso)
-            # print ("Get seller info (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-            seller_city, seller_nickname, seller_level, seller_txs = seller_info["address"]["city"], seller_info["nickname"]\
-                , seller_info["seller_reputation"]["level_id"], seller_info["seller_reputation"]["transactions"]["total"]
+            seller_city, seller_state, seller_nickname, seller_level, seller_txs = seller_info["address"]["city"], seller_info["address"]["state"], seller_info["nickname"], seller_info["seller_reputation"]["level_id"], seller_info["seller_reputation"]["transactions"]["total"]
             
             url = f"https://api.mercadolibre.com/reviews/item/{item_id_con_mla}"
             rating_average, one_star, two_star, three_star, four_star, five_star = get_reviews(url, token_de_acceso)
 
+            if item_id_con_mla not in list(dict_items.keys()):
+                dict_items[item_id_con_mla] = [item_url, cant_preguntas, cant_respuestas, cantidad_visitas_l3m, rating_average, one_star, 
+                                                two_star, three_star, four_star, five_star]            
+
             # Rellenamos el diccionario de vendedores y ubicacion
             if seller_nickname not in list(dict_vendors_name_and_city.keys()):
-                dict_vendors_name_and_city[seller_nickname] = [seller_level, seller_txs, cantidad_visitas]
-
-            # Rellenamos el diccionario de items, url y vendedor (luego joinearlo con un merge de dos df)
-            for seller_nickname, ciudad in dict_vendors_name_and_city.items():
-                fila = {
-                    "seller_nickname" : seller_nickname,
-                    "item_id" : item_id_con_mla,
-                    "item_url" : item_url,
-                    "seller_level" : seller_level, 
-                    "seller_txs" : seller_txs,
-                    "rating_average" : rating_average, 
-                    "one_star": one_star, 
-                    "two_star" : two_star, 
-                    "three_star" : three_star, 
-                    "four_star" : four_star, 
-                    "five_star" : five_star
-                }
-                data_diccionario_items.append(fila)
-
+                dict_vendors_name_and_city[seller_nickname] = [seller_level, seller_txs, seller_city, seller_state]
+            
         except:
             pass
 
-    df_reputacion_vendors = pd.DataFrame(data_diccionario_items)
+    # Rellenamos el diccionario de items
+    for item_id_con_mla, item_values in dict_items.items():
+        fila = {
+            "item_id" : item_id_con_mla,
+            "item_url" : item_values[0],
+            "visitas_l3m" : item_values[3],
+            "cant_preguntas" : item_values[1],
+            "pct_respuesta" : str(round((item_values[2]/item_values[1]) if item_values[1] != 0 else 0,2)),
+            "rating_average" : item_values[4], 
+            "one_star": item_values[5], 
+            "two_star" : item_values[6], 
+            "three_star" : item_values[7], 
+            "four_star" : item_values[8], 
+            "five_star" : item_values[9]
+        }
+        data_diccionario_items.append(fila)
+    
+    # Rellenamos el diccionario de sellers
+    for seller_nickname, seller_values in dict_vendors_name_and_city.items():
+        fila = {
+            "seller_nickname" : seller_nickname,
+            "seller_city" : seller_values[2],
+            "seller_state" : seller_state[3],
+            "seller_level" : seller_values[0], 
+            "seller_txs" : seller_values[1],
+        }
+        data_diccionario_sellers.append(fila)
+
+    df_reputacion_vendors = pd.DataFrame(data_diccionario_sellers)
+    # df_reputacion_items = pd.DataFrame(data_diccionario_items).sort_values(by='rating_average', ascending=False)
+
     df_reputacion_vendors_sin_dup = df_reputacion_vendors.drop_duplicates(subset=["seller_nickname"], keep='first')
+    df_reputacion_vendors_sin_dup['seller_state'] = df_reputacion_vendors_sin_dup['seller_state'].map(dict_provincias)
+    df_reputacion_vendors_sin_dup = df_reputacion_vendors_sin_dup.sort_values(by='seller_txs', ascending=False)
 
-    print(df_reputacion_vendors_sin_dup[["seller_nickname", "item_url", "seller_level", "seller_txs", "rating_average"]].sort_values(by='rating_average', ascending=False))
-
-    print ("Armado de dataframe final (seconds): " + str((arrow.utcnow() - start).total_seconds()))
-
-    lambda_handler_location(item_name, token_de_acceso)
+    # df_reputacion_vendors_sin_dup = lambda_handler_location(df_reputacion_vendors_sin_dup)
 
     return df_reputacion_vendors_sin_dup
 
-token_de_acceso, cuenta_meli = logueos()
+# token_de_acceso, cuenta_meli, google_api_dict_list = logueos()
 
-lambda_handler('saboteur', '', token_de_acceso)
+# lambda_handler('saboteur', '', token_de_acceso, google_api_dict_list)
 
 # filters_values_dict, filters_values_id_dict, de_para_filtros_dict, de_para_filtros_values_dict = get_search_filters_dictionary("saboteur", token_de_acceso)

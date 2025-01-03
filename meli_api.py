@@ -1,21 +1,18 @@
 import requests
 import json
-import boto3
+import boto3, boto3.session
 import gspread
-import geocoder
 import os
-import pandas as pd
-import numpy as np
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient.errors import HttpError
-from gspread.exceptions import APIError
 from botocore.exceptions import ClientError
 from rapidfuzz import fuzz
 import time
 from datetime import datetime, timedelta
-import pytz
 
 def get_secret_value_aws(secret_name):
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
     session = boto3.session.Session()
     client = session.client(service_name='secretsmanager', region_name="us-east-2")
     try:
@@ -195,7 +192,7 @@ def google_sheets_auth(google_read_api_calls):
     worksheet_tokens_mio = make_read_api_call('get_worksheet_by_id',1387040377,sh,'','', google_api_dict_list)
     google_read_api_calls += 1
 
-    return worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list
+    return worksheet_tokens_mio, gc, google_read_api_calls, google_api_dict_list, creds
 
 def get_item_seller_id(item_id, token_de_acceso):
     url = f"https://api.mercadolibre.com/items/{item_id}?include_attributes=all"
@@ -234,13 +231,13 @@ def get_seller_nickname_and_city(seller_id, token_de_acceso):
     response = requests.request("GET", url, headers=headers, data=payload)
     return response.json()["address"]["city"], response.json()["nickname"]
 
-def find_company_name_in_answers(item_id, token_de_acceso):
-    faq_dict = get_answered_questions(item_id, token_de_acceso)
-    hints = ["somos", "estamos en", "tienda", "saludos"]
-    for answer in faq_dict.values():
-        for hint in hints:
-            if hint in answer:
-                print(f"La palabra {hint} " + "esta dentro de la respuesta")
+# def find_company_name_in_answers(item_id, token_de_acceso):
+#     faq_dict = get_answered_questions(item_id, token_de_acceso)
+#     hints = ["somos", "estamos en", "tienda", "saludos"]
+#     for answer in faq_dict.values():
+#         for hint in hints:
+#             if hint in answer:
+#                 print(f"La palabra {hint} " + "esta dentro de la respuesta")
 
 # Por ahi es mejor dar un listado de opciones y que solo ingreses un numero y te busque con el id exacto de la categoria en vez de tipearla
 def get_codigo_categorias_por_nombre_de_categoria(nombre_categoria, token_de_acceso):
@@ -317,27 +314,27 @@ def get_items_from_name_search(item_name, token_de_acceso):
 
     return all_items
 
-def find_company_name_in_description(item_id, token_de_acceso):
+# def find_company_name_in_description(item_id, token_de_acceso):
 
-    # Aca deberia meter un GET de todos los items que se venden pero filtrando por CIUDAD y PROVINCIA para acortar los resultados
-    item_description =  get_item_description(item_id, token_de_acceso).lower()
-    # print(item_description)
+#     # Aca deberia meter un GET de todos los items que se venden pero filtrando por CIUDAD y PROVINCIA para acortar los resultados
+#     item_description =  get_item_description(item_id, token_de_acceso).lower()
+#     # print(item_description)
 
-    hints = ["somos", "estamos en", "tienda", "saludos"]
-    for hint in hints:
-        if hint in item_description:
-            # print(f"La palabra {hint} " + "esta dentro de la descripcion del item")
+#     hints = ["somos", "estamos en", "tienda", "saludos"]
+#     for hint in hints:
+#         if hint in item_description:
+#             # print(f"La palabra {hint} " + "esta dentro de la descripcion del item")
 
-            seller_id = get_item_seller_id(item_id, token_de_acceso)
-            seller_city, seller_nickname = get_seller_nickname_and_city(seller_id, token_de_acceso)
+#             seller_id = get_item_seller_id(item_id, token_de_acceso)
+#             seller_city, seller_nickname = get_seller_nickname_and_city(seller_id, token_de_acceso)
 
-            return seller_city, seller_nickname
+#             return seller_city, seller_nickname
 
-def find_company_location():
-    # Aca podria buscar en google el nombre de la empresa y con eso buscar con la API de google maps donde se encuentra o scrapear
-    # si tiene pagina web si dice las sucursales y su ubicacion.
+# def find_company_location():
+#     # Aca podria buscar en google el nombre de la empresa y con eso buscar con la API de google maps donde se encuentra o scrapear
+#     # si tiene pagina web si dice las sucursales y su ubicacion.
 
-    return None
+#     return None
 
 def ver_data_schema(result):
     for field in result.keys():
@@ -354,136 +351,163 @@ def ver_data_schema(result):
         else:
             print(field, type(result.get(field)))
 
-def get_coordinates_with_address(address, bing_map_api_key):
-    g = geocoder.bing(address, key = bing_map_api_key)
-    result = g.json    
-    # Check if the geocoding was successful
-    # data = {
-    #     'Latitude': result.get('lat', None),
-    #     'Longitude': result.get('lng', None),
-    #     'City': result.get('city', None),
-    #     'Country': result.get('country', None),
-    #     'Neighborhood': result.get('neighborhood', None),
-    #     'Postal': result.get('postal', None),
-    #     'Locality': result.get('locality', None),
-    #     'AdminDistrict': result.get('raw',[]).get('address',[]).get('adminDistrict', None),
-    #     'AdminDistrict2': result.get('raw',[]).get('address',[]).get('adminDistrict2', None),
-    #     'PostalCode': result.get('raw',[]).get('address',[]).get('postalCode', None),
-    #     'State': result.get('state', None),
-    #     'Street': result.get('street', None)
-    # }
-        
-    return result.get('lat', None), result.get('lng', None)
- 
-def obtener_georeferencia(nombre_del_local, ciudad, bing_map_api_key):
-    # Construir la consulta con nombre del lugar, ciudad y país
-    query = f"{nombre_del_local}, {ciudad}, {"Argentina"}"
+# def validate_location_with_bing(location_name):
+#     """Valida si un nombre corresponde a un lugar real usando la API de Bing Maps."""
+#     params = {
+#         "q": location_name,
+#         "key": 'AthVohQhr_ckM9sVu9PiE3avU4AWvPgmL6186mHVzB-kUTE46TAWKY3WHwDuOw0G'
+#     }
+#     response = requests.get("http://dev.virtualearth.net/REST/v1/Locations", params=params)
+#     data = response.json()
 
-    # URL de la Bing Maps API para realizar la búsqueda
-    url = f"http://dev.virtualearth.net/REST/v1/Locations?query={query}&key={bing_map_api_key}"
-
-    # Realizar la solicitud
-    response = requests.get(url)
-    resultados = response.json()
-
-    # Verifica si se encontraron resultados
-    if resultados['resourceSets'][0]['estimatedTotal'] > 0:
-        lugar = resultados['resourceSets'][0]['resources'][0]
-        nombre = lugar['name']
-        direccion = lugar['address']['formattedAddress']
-        coordenadas = lugar['point']['coordinates']
-        latitud = coordenadas[0]
-        longitud = coordenadas[1]
-    else:
-        print("No se encontró el lugar.")
-
-    return latitud, longitud
-
-def obtener_direccion_por_nombre_comercio_gmaps():
-
-
-    return None
-
-def obtener_nombres_comercios_meli():
-
-
-
-    return None
-
-# Función para calcular la distancia usando la fórmula de Haversine
-def obtener_distancia_entre_local_y_ubicacion_actual(lat1, lon1, lat2, lon2):
-    # Convertir de grados a radianes
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-
-    # Diferencias de latitud y longitud
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-
-    # Aplicar fórmula de Haversine
-    a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
-    c = 2 * np.arcsin(np.sqrt(a))
+#     print(data)
     
-    # Radio de la Tierra en kilómetros
-    r = 6371
-    return round(c * r,1)
+#     # Verificar si la respuesta contiene resultados válidos
+#     if data['resourceSets'][0]['estimatedTotal'] > 0:
+#         print(f"{location_name} es un lugar válido.")
+#         return True
+#     else:
+#         print(f"{location_name} no fue reconocido como un lugar válido.")
+#         return False
 
-def lambda_handler_location(item_name, token_de_acceso):
+# def find_locations_in_text(text):
+#     """Encuentra posibles nombres de ubicaciones en el texto y las valida."""
+#     # Expresión regular para detectar posibles nombres de ubicaciones
+#     possible_locations = re.findall(r"[A-Z][a-z]*(?: [A-Z][a-z]*)*", text)
+    
+#     valid_locations = []
+#     for location in possible_locations:
+#         # Valida si el nombre extraído es una ciudad o ubicación real
+#         if validate_location_with_bing(location):
+#             valid_locations.append(location)
+    
+#     return valid_locations
 
-    items_scrapeados =  get_items_from_name_search(item_name, token_de_acceso) #Ojo con el tema de la paginacion!
+# def get_coordinates_with_address(address, bing_map_api_key):
+#     g = geocoder.bing(address, key = bing_map_api_key)
+#     result = g.json    
+#     # Check if the geocoding was successful
+#     data = {
+#         'Latitude': result.get('lat', None),
+#         'Longitude': result.get('lng', None),
+#         'City': result.get('city', None),
+#         'Country': result.get('country', None),
+#         'Neighborhood': result.get('neighborhood', None),
+#         'Postal': result.get('postal', None),
+#         'Locality': result.get('locality', None),
+#         'AdminDistrict': result.get('raw',[]).get('address',[]).get('adminDistrict', None),
+#         'AdminDistrict2': result.get('raw',[]).get('address',[]).get('adminDistrict2', None),
+#         'PostalCode': result.get('raw',[]).get('address',[]).get('postalCode', None),
+#         'State': result.get('state', None),
+#         'Street': result.get('street', None)
+#     }
+        
+#     return data 
+ 
+# def obtener_georeferencia(nombre_del_local, ciudad, bing_map_api_key):
+#     # Construir la consulta con nombre del lugar, ciudad y país
+#     query = f"{nombre_del_local}, {ciudad}, {"Argentina"}"
 
-    dict_vendors_name_and_city = dict()
-    data_diccionario_items = []
+#     # URL de la Bing Maps API para realizar la búsqueda
+#     url = f"http://dev.virtualearth.net/REST/v1/Locations?query={query}&key={bing_map_api_key}"
 
-    for item in items_scrapeados:
-        item_id_con_mla = item['id']
-        item_url = item['permalink']
-        try:
-            ciudad, nombre_del_local = find_company_name_in_description(item_id_con_mla, token_de_acceso)
+#     # Realizar la solicitud
+#     response = requests.get(url)
+#     resultados = response.json()
 
-            # Rellenamos el diccionario de vendedores y ubicacion
-            if nombre_del_local not in list(dict_vendors_name_and_city.keys()):
-                dict_vendors_name_and_city[nombre_del_local] = ciudad
+#     # Verifica si se encontraron resultados
+#     if resultados['resourceSets'][0]['estimatedTotal'] > 0:
+#         lugar = resultados['resourceSets'][0]['resources'][0]
+#         print(lugar)
+#         nombre = lugar['name']
+#         partido = lugar['address']['formattedAddress']
+#         locality = lugar['address']['locality']
+#         coordenadas = lugar['point']['coordinates']
+#         confidence = lugar['confidence'] 
+#         print('Localidad: ', partido.strip(', Argentina'))
+#         print('Localidad: ', locality)
+#         print('Certeza: ', confidence)
+#         latitud = coordenadas[0]
+#         longitud = coordenadas[1]
+#     else:
+#         print("No se encontró el lugar.")
 
-            # Rellenamos el diccionario de items, url y vendedor (luego joinearlo con un merge de dos df)
-            for nombre_del_local, ciudad in dict_vendors_name_and_city.items():
-                fila = {
-                    "nombre_del_local" : nombre_del_local,
-                    "item_id" : item_id_con_mla,
-                    "item_url" : item_url
-                } 
-                data_diccionario_items.append(fila)
+#     return latitud, longitud
 
-        except:
-            pass
+# # Función para calcular la distancia usando la fórmula de Haversine
+# def obtener_distancia_entre_local_y_ubicacion_actual(lat1, lon1, lat2, lon2):
+#     # Convertir de grados a radianes
+#     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
 
-    # Obtener la API key desde las variables de entorno
-    bing_map_api_key = os.getenv('API_KEY')
+#     # Diferencias de latitud y longitud
+#     dlat = lat2 - lat1
+#     dlon = lon2 - lon1
 
-    if not bing_map_api_key:
-        raise ValueError("No se encontró la API key")
+#     # Aplicar fórmula de Haversine
+#     a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+#     c = 2 * np.arcsin(np.sqrt(a))
+    
+#     # Radio de la Tierra en kilómetros
+#     r = 6371
+#     return round(c * r,1)
 
-    # Coordenadas de tu ubicación actual (Aguero 1595)
-    mi_latitud, mi_longitud = get_coordinates_with_address('Agüero 1595, Capital Federal, Argentina', bing_map_api_key)
+# def lambda_handler_location(df_reputacion_vendors_sin_dup):
 
-    data = []
-    for nombre_del_local, ciudad in dict_vendors_name_and_city.items():
-        latitud, longitud = obtener_georeferencia(nombre_del_local, ciudad, bing_map_api_key)
-        fila = {
-            "nombre_del_local" : nombre_del_local,
-            "ciudad" : ciudad,
-            "latitud" : latitud,
-            "longitud": longitud,
-            "distancia": obtener_distancia_entre_local_y_ubicacion_actual(mi_latitud, mi_longitud, latitud, longitud),
-        } 
-        data.append(fila)
+#     # Obtener la API key desde las variables de entorno
+#     bing_map_api_key = os.getenv('API_KEY')
+#     if not bing_map_api_key:
+#         raise ValueError("No se encontró la API key")
 
-    df_distancias_vendors = pd.DataFrame(data)
-    df_items_vendors = pd.DataFrame(data_diccionario_items)
+#     # Coordenadas de tu ubicación actual (Aguero 1595)
+#     location_data = get_coordinates_with_address('Agüero 1595, Autonomous City of Buenos Aires, Argentina', bing_map_api_key)
 
-    df_final = df_items_vendors.merge(df_distancias_vendors, on='nombre_del_local', how='left')
+#     mi_latitud = location_data['Latitude']
+#     mi_longitud = location_data['Longitude']
 
-    print(df_final.sort_values(by='distancia', ascending=True))
+#     georeferencia = df_reputacion_vendors_sin_dup.apply(
+#     lambda row: obtener_georeferencia(row['seller_nickname'], row['seller_city'], bing_map_api_key), axis=1)
 
-    # df_georeferencias['distancia_km'] = df_georeferencias.apply(lambda row: obtener_distancia_entre_local_y_ubicacion_actual(mi_latitud, mi_longitud, row['latitude'], row['longitude']), axis=1)
+#     df_reputacion_vendors_sin_dup[['latitud', 'longitud']] = pd.DataFrame(georeferencia.tolist(), index=df_reputacion_vendors_sin_dup.index)
 
-    return df_final
+#     #agregar aca una validacion que las coordenadas que trae son de la ciudad que se le pasó como parametro
+#     distancia = df_reputacion_vendors_sin_dup.apply(
+#     lambda row: obtener_distancia_entre_local_y_ubicacion_actual(mi_latitud, mi_longitud, row['latitud'], row['longitud']), axis=1)
+    
+#     df_reputacion_vendors_sin_dup[["distancia"]] = pd.DataFrame(distancia.tolist(), index=df_reputacion_vendors_sin_dup.index)
+
+#     return df_reputacion_vendors_sin_dup
+
+# # Función para descargar la imagen desde la URL
+# def download_image(url):
+#     response = requests.get(url)
+#     if response.status_code == 200:
+#         return response.content  # Devuelve el contenido de la imagen en bytes
+#     else:
+#         raise Exception(f"Error al descargar la imagen: {response.status_code}")
+
+# # Función para detectar texto en la imagen usando Google Cloud Vision
+# def detect_text_from_url(image_url, google_api_dict_list):
+    # Descargar la imagen desde la URL
+    # image_content = download_image(image_url)
+
+    # # Crear un cliente de Vision usando las credenciales de tu cuenta de servicio
+    # creds_vision = Credentials.from_service_account_info(google_api_dict_list[0])
+    # client_vision = vision.ImageAnnotatorClient(credentials=creds_vision)
+    # # client_vision = vision.ImageAnnotatorClient(credentials=creds)
+
+    # # Crear una imagen con el contenido descargado (en bytes)
+    # image = vision.Image(content=image_content)
+
+    # # Enviar la imagen a la API de Google Cloud Vision para detectar texto
+    # response = client_vision.text_detection(image=image)
+
+    # if response.error.message:
+    #     raise Exception(f"Error de Vision API: {response.error.message}")
+
+    # extracted_texts = []
+
+    # # Imprimir el texto detectado
+    # for text in response.text_annotations:
+    #     extracted_texts.append(text.description)
+        
+    # return extracted_texts

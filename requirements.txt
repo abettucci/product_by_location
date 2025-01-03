@@ -13,5 +13,7 @@ bs4==0.0.1
 streamlit
 pytz
 arrow
-Pillow
-geocoder
+# Pillow
+# geocoder
+protobuf==3.20.3
+# google-cloud-vision
