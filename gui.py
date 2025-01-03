@@ -2,7 +2,7 @@ import streamlit as st
 from search_by_reputation import logueos, lambda_handler, get_search_filters_dictionary
     
 # Obtener el token de acceso y la cuenta de MercadoLibre
-token_de_acceso, cuenta_meli = logueos()
+token_de_acceso, cuenta_meli, google_api_dict_list = logueos()
 
 # Crear el título de la app
 st.title("MercadoLibre Bot Scraper de vendedores con mejor reputacion, cercania y mayor cantidad de preguntas respondidas")

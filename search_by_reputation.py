@@ -199,7 +199,6 @@ def google_sheets_auth(google_read_api_calls):
         'abettucci/MELIproject/Google_API_JSON_Key_File']
     for api_dict in google_key_locations:
         secret = get_secret_value_aws(api_dict)
-
         secret_data = json.loads(secret)
         key_dict = {
             "private_key_id" : secret_data.get('private_key_id'),
