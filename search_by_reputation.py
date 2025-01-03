@@ -346,6 +346,9 @@ def get_search_filters_dictionary(item_name, token_de_acceso):
     response = get_request(url, headers=headers).json()
 
     available_filters = response["available_filters"]
+
+    print(available_filters)
+
     filters_values_dict = dict()
     filters_values_id_dict = dict()
     de_para_filtros_dict = dict()
@@ -359,6 +362,9 @@ def get_search_filters_dictionary(item_name, token_de_acceso):
     for filter in available_filters:
         values = filter['values']
         for value in values:
+            
+            print(filter['name'])
+
             if list(filters_values_dict.keys()) == []:
                 filters_values_dict[filter['name']] = [value['name']]
             elif filter['name'] in list(filters_values_dict.keys()):
