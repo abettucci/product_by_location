@@ -31,7 +31,7 @@ def get_secret_value_aws(secret_name):
     AWS_ACCESS_KEY_ID = st.secrets["AWS_ACCESS_KEY_ID"]
     AWS_SECRET_ACCESS_KEY = st.secrets["AWS_SECRET_ACCESS_KEY"]
     region_name = st.secrets.get("AWS_REGION", "us-east-2")
-
+    
     # Crear sesión con las credenciales
     session = boto3.session.Session(
         aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -360,8 +360,6 @@ def get_search_filters_dictionary(item_name, token_de_acceso):
         values = filter['values']
         for value in values:
             
-            print(filter['name'])
-
             if list(filters_values_dict.keys()) == []:
                 filters_values_dict[filter['name']] = [value['name']]
             elif filter['name'] in list(filters_values_dict.keys()):
@@ -373,6 +371,7 @@ def get_search_filters_dictionary(item_name, token_de_acceso):
         values = filter['values']
         for value in values:
             de_para_filtros_dict[value['name']] = value['id']
+
             de_para_filtros_values_dict[value['id']] = filter['id']
 
     return filters_values_dict, filters_values_id_dict, de_para_filtros_dict, de_para_filtros_values_dict
@@ -534,7 +533,7 @@ def logueos():
 
 #     # return  diccionario_fotos
 
-def lambda_handler(item_name, filtros, token_de_acceso, google_api_dict_list):
+def lambda_handler(item_name, token_de_acceso, filtros, google_api_dict_list):
     items_scrapeados =  get_items_from_name_search(item_name, filtros, token_de_acceso)
     
     dict_provincias = {
@@ -590,11 +589,11 @@ def lambda_handler(item_name, filtros, token_de_acceso, google_api_dict_list):
 
             if item_id_con_mla not in list(dict_items.keys()):
                 dict_items[item_id_con_mla] = [item_url, cant_preguntas, cant_respuestas, cantidad_visitas_l3m, rating_average, one_star, 
-                                                two_star, three_star, four_star, five_star]            
+                                                two_star, three_star, four_star, five_star, seller_id]            
 
             # Rellenamos el diccionario de vendedores y ubicacion
             if seller_nickname not in list(dict_vendors_name_and_city.keys()):
-                dict_vendors_name_and_city[seller_nickname] = [seller_level, seller_txs, seller_city, seller_state]
+                dict_vendors_name_and_city[seller_nickname] = [seller_level, seller_txs, seller_city, seller_state, seller_id]
             
         except:
             pass
@@ -602,41 +601,45 @@ def lambda_handler(item_name, filtros, token_de_acceso, google_api_dict_list):
     # Rellenamos el diccionario de items
     for item_id_con_mla, item_values in dict_items.items():
         fila = {
+            "seller_id" : item_values[10],
             "item_id" : item_id_con_mla,
             "item_url" : item_values[0],
             "visitas_l3m" : item_values[3],
             "cant_preguntas" : item_values[1],
             "pct_respuesta" : str(round((item_values[2]/item_values[1]) if item_values[1] != 0 else 0,2)),
-            "rating_average" : item_values[4], 
-            "one_star": item_values[5], 
-            "two_star" : item_values[6], 
-            "three_star" : item_values[7], 
-            "four_star" : item_values[8], 
-            "five_star" : item_values[9]
+            "rating_average" : item_values[4]
+            # "one_star": item_values[5], 
+            # "two_star" : item_values[6], 
+            # "three_star" : item_values[7], 
+            # "four_star" : item_values[8], 
+            # "five_star" : item_values[9]
         }
         data_diccionario_items.append(fila)
+    
+    df_reputacion_items = pd.DataFrame(data_diccionario_items)
     
     # Rellenamos el diccionario de sellers
     for seller_nickname, seller_values in dict_vendors_name_and_city.items():
         fila = {
+            "seller_id" : seller_values[4],
             "seller_nickname" : seller_nickname,
             "seller_city" : seller_values[2],
             "seller_state" : seller_state[3],
             "seller_level" : seller_values[0], 
-            "seller_txs" : seller_values[1],
+            "seller_txs" : seller_values[1]
         }
         data_diccionario_sellers.append(fila)
 
     df_reputacion_vendors = pd.DataFrame(data_diccionario_sellers)
-    # df_reputacion_items = pd.DataFrame(data_diccionario_items).sort_values(by='rating_average', ascending=False)
-
     df_reputacion_vendors_sin_dup = df_reputacion_vendors.drop_duplicates(subset=["seller_nickname"], keep='first')
     df_reputacion_vendors_sin_dup['seller_state'] = df_reputacion_vendors_sin_dup['seller_state'].map(dict_provincias)
-    df_reputacion_vendors_sin_dup = df_reputacion_vendors_sin_dup.sort_values(by='seller_txs', ascending=False)
 
+    df_merged = pd.merge(df_reputacion_items, df_reputacion_vendors_sin_dup, how='left', on='seller_id')
+    df_merged = df_merged.drop('seller_id', axis=1)
+    df_merged = df_merged.sort_values(by=['seller_txs','rating_average'], ascending=False, ignore_index=True)
     # df_reputacion_vendors_sin_dup = lambda_handler_location(df_reputacion_vendors_sin_dup)
 
-    return df_reputacion_vendors_sin_dup
+    return df_merged
 
 # token_de_acceso, cuenta_meli, google_api_dict_list = logueos()
 
